@@ -43,6 +43,23 @@ python app.py
 
 A API estará disponível em `http://localhost:5000`
 
+## 📚 Documentação da API (Swagger UI)
+
+A aplicação agora inclui documentação interativa da API através do Flask-RESTX com Swagger UI:
+
+- **Swagger UI**: `http://localhost:5000/docs/` - Interface interativa para visualizar e testar todos os endpoints
+- **Raiz do projeto**: `http://localhost:5000/` - Redireciona automaticamente para a documentação
+
+### Funcionalidades do Swagger UI:
+- ✅ Visualização completa de todas as rotas da API
+- ✅ Documentação detalhada de parâmetros e modelos de dados
+- ✅ Interface "Try it out" para criar e executar requisições diretamente no navegador
+- ✅ Exemplos de requisições e respostas
+- ✅ Geração automática de comandos curl
+- ✅ Validação de entrada em tempo real
+
+**Não é mais necessário usar ferramentas externas como Postman** - tudo pode ser testado diretamente na interface web!
+
 ## 📊 Estrutura da Base de Dados
 
 ### Tabela Honeypots
