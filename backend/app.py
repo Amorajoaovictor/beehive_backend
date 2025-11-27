@@ -4,6 +4,8 @@ from flask_migrate import Migrate
 from flask_cors import CORS
 from flask_restx import Api, Resource, fields
 from datetime import datetime
+from docker_manager import create_node
+from docker.errors import DockerException
 import os
 from dotenv import load_dotenv
 
@@ -136,42 +138,55 @@ class HoneypotList(Resource):
         """Lista todos os honeypots"""
         honeypots = Honeypot.query.all()
         return [honeypot.to_dict() for honeypot in honeypots]
-    
+
     @honeypots_ns.doc('create_honeypot')
     @honeypots_ns.expect(honeypot_input_model)
     @honeypots_ns.marshal_with(honeypot_model, code=201)
     def post(self):
-        """Cria um novo honeypot"""
         data = request.get_json()
-        
-        # Validate required fields
+
         required_fields = ['name', 'type', 'port']
         for field in required_fields:
             if field not in data:
                 api.abort(400, f'Missing required field: {field}')
-        
-        # Validate honeypot type
+
         valid_types = ['ssh', 'telnet', 'http']
-        if data['type'] not in valid_types:
+        hp_type = data['type']
+        if hp_type not in valid_types:
             api.abort(400, f'Invalid type. Must be one of: {valid_types}')
-        
+
+        host = data.get('host', '0.0.0.0')
+        port = data['port']
+        status = data.get('status', 'inactive')
+
+        try:
+            node_info = create_node(hp_type, requested_port=port)
+            host = node_info['host']
+            port = node_info['port']
+            status = 'active'
+        except DockerException as e:
+            api.abort(500, f'Error creating honeypot node in Docker: {str(e)}')
+        except Exception as e:
+            api.abort(500, f'Unexpected error creating honeypot node: {str(e)}')
+
         try:
             honeypot = Honeypot(
                 name=data['name'],
-                type=data['type'],
-                host=data.get('host', '0.0.0.0'),
-                port=data['port'],
-                status=data.get('status', 'inactive')
+                type=hp_type,
+                host=host,
+                port=port,
+                status=status
             )
-            
+
             db.session.add(honeypot)
             db.session.commit()
-            
+
             return honeypot.to_dict(), 201
-        
+
         except Exception as e:
             db.session.rollback()
             api.abort(500, f'Error creating honeypot: {str(e)}')
+
 
 @honeypots_ns.route('/<int:honeypot_id>')
 @honeypots_ns.param('honeypot_id', 'ID único do honeypot')
