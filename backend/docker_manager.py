@@ -1,8 +1,18 @@
 import random
 import time
-
+import socket
 import docker
-from docker.errors import DockerException
+from docker.errors import DockerException, NotFound
+from elasticsearch import logger
+
+
+def check_docker_available(timeout_sec: int = 3) -> bool:
+    try:
+        client = docker.from_env(timeout=timeout_sec)
+        client.version()
+        return True
+    except DockerException:
+        return False
 
 HONEYPOT_CONFIG = {
     "ssh": {
@@ -34,10 +44,6 @@ def get_client():
 
 
 def create_node(node_type: str, requested_port: int | None = 0) -> dict:
-    """
-    Cria um Honeypot Node como container Docker e retorna
-    informações úteis (host, porta, container_id, etc.).
-    """
     if node_type not in HONEYPOT_CONFIG:
         raise ValueError(f"Node type '{node_type}' not supported")
 
@@ -52,7 +58,7 @@ def create_node(node_type: str, requested_port: int | None = 0) -> dict:
     env.update(extra_env)
 
     ports = {
-        container_port: requested_port or None  # None = Docker escolhe porta livre
+        container_port: requested_port or None
     }
 
     client = get_client()
@@ -95,3 +101,48 @@ def create_node(node_type: str, requested_port: int | None = 0) -> dict:
         "port": host_port or requested_port,
         "status": container.status,
     }
+
+def remove_node(container_id: str, timeout: int = 5) -> bool:
+    """
+    Para e remove um container pelo container_id.
+    Retorna True se removido com sucesso, False caso contrário.
+    Não lança exceções (tratadas internamente).
+    """
+    try:
+        client = docker.from_env()
+    except DockerException as e:
+        logger.error("Docker client not available when trying to remove container: %s", e)
+        return False
+
+    try:
+        container = client.containers.get(container_id)
+    except NotFound:
+        logger.info("Container %s not found (already removed).", container_id)
+        return True
+    except DockerException as e:
+        logger.error("Erro ao obter container %s: %s", container_id, e)
+        return False
+
+    try:
+        # tentar parar o container graciosamente
+        try:
+            container.stop(timeout=timeout)
+        except Exception:
+            # ignora falha ao parar, passaremos a remover
+            logger.debug("Falha ao parar container %s; tentando remover direto", container_id)
+
+        container.remove(force=True)
+        logger.info("Container %s removido com sucesso.", container_id)
+        return True
+    except Exception as e:
+        logger.error("Erro ao remover container %s: %s", container_id, e)
+        return False
+
+def is_port_free(port: int, host: str = "0.0.0.0") -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        try:
+            s.bind((host, port))
+            return True
+        except OSError:
+            return False

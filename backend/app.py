@@ -1,25 +1,39 @@
+import os
+from datetime import datetime
+from dotenv import load_dotenv
 from flask import Flask, request, jsonify, redirect
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_cors import CORS
 from flask_restx import Api, Resource, fields
-from datetime import datetime
-from docker_manager import create_node
 from docker.errors import DockerException
-import os
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+THIS_DIR = os.path.abspath(os.path.dirname(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))
+
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
+
+try:
+    from docker_manager import create_node, is_port_free, remove_node
+except Exception:
+    try:
+        from backend.docker_manager import create_node, is_port_free, remove_node
+    except Exception as e:
+        raise ImportError(
+            f"Nao foi possivel importar docker_manager: {e}\n"
+            "Execute o backend via:\n"
+            "    python -m backend.app\n"
+            "ou ajuste PYTHONPATH."
+        )
+
+
+
+default_db = f"sqlite:///{os.path.join(PROJECT_ROOT, 'instance', 'beehive.db')}"
 
 app = Flask(__name__)
-
-# Configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///beehive.db')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', default_db)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
 
-# Initialize extensions
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 CORS(app)
@@ -38,6 +52,8 @@ api = Api(
 class Honeypot(db.Model):
     __tablename__ = 'honeypots'
     
+    container_id = db.Column(db.String(128), nullable=True)
+    container_name = db.Column(db.String(128), nullable=True)
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     type = db.Column(db.String(20), nullable=False)  # ssh, telnet, http
@@ -144,7 +160,6 @@ class HoneypotList(Resource):
     @honeypots_ns.marshal_with(honeypot_model, code=201)
     def post(self):
         data = request.get_json()
-
         required_fields = ['name', 'type', 'port']
         for field in required_fields:
             if field not in data:
@@ -159,15 +174,23 @@ class HoneypotList(Resource):
         port = data['port']
         status = data.get('status', 'inactive')
 
+        if not is_port_free(port):
+            api.abort(409, f"Port {port} already in use on host.")
+
+        # 1) criar o container primeiro
         try:
             node_info = create_node(hp_type, requested_port=port)
-            host = node_info['host']
-            port = node_info['port']
-            status = 'active'
+            # node_info deve conter: container_id, container_name, host, port, status
         except DockerException as e:
             api.abort(500, f'Error creating honeypot node in Docker: {str(e)}')
         except Exception as e:
             api.abort(500, f'Unexpected error creating honeypot node: {str(e)}')
+
+        container_id = node_info.get('container_id')
+        container_name = node_info.get('container_name')
+        host = node_info.get('host', host)
+        port = node_info.get('port', port)
+        status = node_info.get('status', 'active')
 
         try:
             honeypot = Honeypot(
@@ -175,17 +198,28 @@ class HoneypotList(Resource):
                 type=hp_type,
                 host=host,
                 port=port,
-                status=status
+                status=status,
+                container_id=container_id,
+                container_name=container_name
             )
-
             db.session.add(honeypot)
             db.session.commit()
-
             return honeypot.to_dict(), 201
 
         except Exception as e:
+            # se falhar ao persistir, remover container criado para cleanup
             db.session.rollback()
-            api.abort(500, f'Error creating honeypot: {str(e)}')
+            removed = False
+            try:
+                removed = remove_node(container_id)
+            except Exception:
+                removed = False
+            # log opcional: registrar que removemos (ou não) o container
+            if removed:
+                api.abort(500, f'Error creating honeypot DB entry; container removed. DB error: {str(e)}')
+            else:
+                api.abort(500, f'Error creating honeypot DB entry; failed to remove container {container_id}. DB error: {str(e)}')
+
 
 
 @honeypots_ns.route('/<int:honeypot_id>')
@@ -230,17 +264,49 @@ class HoneypotResource(Resource):
     
     @honeypots_ns.doc('delete_honeypot')
     def delete(self, honeypot_id):
-        """Remove um honeypot e todos os seus logs"""
+        """Remove um honeypot, seu container Docker (se existir) e todos os seus logs"""
         try:
             honeypot = Honeypot.query.get_or_404(honeypot_id)
+            container_id = getattr(honeypot, 'container_id', None)
+
+            container_removed = False
+            removal_message = ""
+            if container_id:
+                try:
+                    # remove_node deve retornar True/False
+                    from .docker_manager import remove_node as _remove_node
+                except Exception:
+                    # fallback import (robusto)
+                    try:
+                        from backend.docker_manager import remove_node as _remove_node
+                    except Exception:
+                        _remove_node = None
+
+                if _remove_node:
+                    try:
+                        container_removed = _remove_node(container_id)
+                        removal_message = "container_removed" if container_removed else "container_not_removed"
+                    except Exception as e:
+                        container_removed = False
+                        removal_message = f"container_remove_error: {str(e)}"
+                else:
+                    removal_message = "no_remove_node_available"
+            else:
+                removal_message = "no_container_id"
+
+            # remover o registro do DB (logs em cascade)
             db.session.delete(honeypot)
             db.session.commit()
-            
-            return {'message': 'Honeypot deleted successfully'}, 200
-        
+
+            return {
+                'message': 'Honeypot deleted successfully',
+                'container_status': removal_message
+            }, 200
+
         except Exception as e:
             db.session.rollback()
             api.abort(500, f'Error deleting honeypot: {str(e)}')
+
 
 @logs_ns.route('/')
 class LogList(Resource):
