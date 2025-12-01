@@ -337,36 +337,22 @@ class LogList(Resource):
     @logs_ns.expect(log_input_model)
     @logs_ns.marshal_with(log_model, code=201)
     def post(self):
-        """Cria um novo log"""
         data = request.get_json()
-        
-        # Validate required fields
-        required_fields = ['honeypot_id', 'ip_address', 'event_type']
-        for field in required_fields:
-            if field not in data:
-                api.abort(400, f'Missing required field: {field}')
-        
-        # Validate honeypot exists
-        honeypot = Honeypot.query.get(data['honeypot_id'])
-        if not honeypot:
-            api.abort(404, 'Honeypot not found')
-        
         try:
-            log = Log(
-                honeypot_id=data['honeypot_id'],
-                ip_address=data['ip_address'],
-                event_type=data['event_type'],
-                details=data.get('details', '')
-            )
-            
-            db.session.add(log)
-            db.session.commit()
-            
-            return log.to_dict(), 201
-        
+            from .log_manager import process_log_safe
+        except Exception:
+            from backend.log_manager import process_log_safe
+
+        try:
+            created = process_log_safe(data)
+            return created, 201
+        except ValueError as ve:
+            api.abort(400, str(ve))
+        except RuntimeError as re:
+            api.abort(500, f'Error persisting log: {str(re)}')
         except Exception as e:
-            db.session.rollback()
-            api.abort(500, f'Error creating log: {str(e)}')
+            api.abort(500, f'Unexpected error creating log: {str(e)}')
+
 
 @logs_ns.route('/<int:log_id>')
 @logs_ns.param('log_id', 'ID único do log')
