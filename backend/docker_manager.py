@@ -47,11 +47,6 @@ HONEYPOT_CONFIG = {
 
 
 def get_client():
-    """
-    Lazy import and resilient creation of Docker client.
-    Tries docker.from_env() and falls back to DockerClient(base_url=unix://...).
-    Raises RuntimeError when Docker SDK/daemon unavailable.
-    """
     try:
         import docker
     except Exception as e:
@@ -94,31 +89,32 @@ def create_node(node_type: str, requested_port: Optional[int] = None) -> dict:
     env = {}
     env.update(extra_env)
 
-    # docker-py accepts port mapping like {"2222/tcp": host_port}
     ports = {container_port: (requested_port if requested_port else None)}
 
     client = get_client()
 
-    try:
-        container = client.containers.run(
-            image=image,
-            detach=True,
-            name=name,
-            environment=env,
-            ports=ports,
-            restart_policy={"Name": "unless-stopped"},
-            labels={
-                "project": "beehive",
-                "node_type": node_type,
-            },
-            cap_drop=["ALL"],
-            security_opt=["no-new-privileges"],
-            mem_limit="512m",
-            cpu_shares=256,
-        )
-    except Exception as e:
-        logger.error("Failed to run container for %s: %s", node_type, e)
-        raise
+    run_kwargs = dict(
+        image=image,
+        detach=True,
+        name=name,
+        environment=env,
+        ports=ports,
+        restart_policy={"Name": "unless-stopped"},
+        labels={
+            "project": "beehive",
+            "node_type": node_type,
+        },
+        #cap_drop=["ALL"],
+        cap_add=["NET_BIND_SERVICE", "CHOWN", "SETGID", "SETUID", "DAC_OVERRIDE"],
+        security_opt=["no-new-privileges"],
+        mem_limit="512m",
+        cpu_shares=256,
+    )
+
+    if cfg.get("user"):
+        run_kwargs["user"] = cfg["user"]
+
+    container = client.containers.run(**run_kwargs)
 
     host_port = None
     # wait for the host port to appear in the container's NetworkSettings

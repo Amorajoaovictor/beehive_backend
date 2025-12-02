@@ -14,7 +14,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 try:
-    from docker_manager import create_node, is_port_free, remove_node
+    from docker_manager import create_node, is_port_free, remove_node, logger
 except Exception:
     try:
         from backend.docker_manager import create_node, is_port_free, remove_node
@@ -138,20 +138,16 @@ honeypots_ns = api.namespace('honeypots', description='Operações relacionadas 
 logs_ns = api.namespace('logs', description='Operações relacionadas aos logs')
 health_ns = api.namespace('health', description='Verificação de saúde da API')
 
-# Add root route after api initialization
 @app.route('/')
 def index():
-    """Redirect to API documentation"""
     return redirect('/docs/')
 
-# Flask-RESTX Resources
 
 @honeypots_ns.route('/')
 class HoneypotList(Resource):
     @honeypots_ns.doc('list_honeypots')
     @honeypots_ns.marshal_list_with(honeypot_model)
     def get(self):
-        """Lista todos os honeypots"""
         honeypots = Honeypot.query.all()
         return [honeypot.to_dict() for honeypot in honeypots]
 
@@ -160,6 +156,8 @@ class HoneypotList(Resource):
     @honeypots_ns.marshal_with(honeypot_model, code=201)
     def post(self):
         data = request.get_json()
+
+        # 1. Validacoes Basicas
         required_fields = ['name', 'type', 'port']
         for field in required_fields:
             if field not in data:
@@ -172,24 +170,23 @@ class HoneypotList(Resource):
 
         host = data.get('host', '0.0.0.0')
         port = data['port']
-        status = data.get('status', 'inactive')
 
         if not is_port_free(port):
             api.abort(409, f"Port {port} already in use on host.")
 
-        # 1) criar o container primeiro
+        node_info = {}
         try:
             node_info = create_node(hp_type, requested_port=port)
-            # node_info deve conter: container_id, container_name, host, port, status
         except DockerException as e:
+            logger.error(f"Docker error: {e}")
             api.abort(500, f'Error creating honeypot node in Docker: {str(e)}')
         except Exception as e:
+            logger.error(f"Unexpected error: {e}")
             api.abort(500, f'Unexpected error creating honeypot node: {str(e)}')
 
         container_id = node_info.get('container_id')
         container_name = node_info.get('container_name')
-        host = node_info.get('host', host)
-        port = node_info.get('port', port)
+        real_port = node_info.get('port', port)
         status = node_info.get('status', 'active')
 
         try:
@@ -197,28 +194,34 @@ class HoneypotList(Resource):
                 name=data['name'],
                 type=hp_type,
                 host=host,
-                port=port,
+                port=real_port,
                 status=status,
                 container_id=container_id,
                 container_name=container_name
             )
             db.session.add(honeypot)
             db.session.commit()
-            return honeypot.to_dict(), 201
+
+            try:
+                from backend.log_monitor import attach_log_forwarder
+                if container_id:
+                    attach_log_forwarder(container_id, honeypot.id)
+            except ImportError:
+                logger.warning("backend.log_monitor nao encontrado. Logs nao serao coletados.")
+            except Exception as e:
+                logger.error(f"Falha ao anexar log forwarder: {e}")
+
+            return honeypot, 201
 
         except Exception as e:
-            # se falhar ao persistir, remover container criado para cleanup
             db.session.rollback()
-            removed = False
-            try:
-                removed = remove_node(container_id)
-            except Exception:
-                removed = False
-            # log opcional: registrar que removemos (ou não) o container
-            if removed:
-                api.abort(500, f'Error creating honeypot DB entry; container removed. DB error: {str(e)}')
-            else:
-                api.abort(500, f'Error creating honeypot DB entry; failed to remove container {container_id}. DB error: {str(e)}')
+            logger.error(f"Erro ao salvar no DB, revertendo criacao do container: {e}")
+
+            if container_id:
+                remove_node(container_id)
+
+            api.abort(500, 'Database error occurred. Container creation rolled back.')
+
 
 
 
@@ -382,7 +385,6 @@ class LogResource(Resource):
 class HealthCheck(Resource):
     @health_ns.doc('health_check')
     def get(self):
-        """Verifica o estado da API"""
         return {'status': 'healthy', 'timestamp': datetime.utcnow().isoformat()}
 
 if __name__ == '__main__':
