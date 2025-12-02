@@ -186,6 +186,13 @@ python app.py &
 python test_api.py
 ```
 
+**📖 Documentação Completa dos Testes:** Consulte o arquivo [TESTES.md](TESTES.md) para uma documentação detalhada de todos os testes, incluindo:
+- Explicação de cada teste e sua finalidade
+- Exemplos de requisições e respostas esperadas
+- Capturas de tela da interface Swagger UI
+- Guia de solução de problemas
+- Cobertura completa dos testes
+
 ## ⚙️ Configuração
 
 ### Variáveis de Ambiente
