@@ -5,10 +5,6 @@ from requests.exceptions import RequestException
 from datetime import datetime
 import os
 
-# ================================
-# Dados / Integração com API
-# ================================
-# Fallbacks (mocks) para quando a API não estiver disponível
 MOCK_IPS = pd.DataFrame([
     {"IP": "192.168.0.55", "Origem": "Brasil", "Ataque": "SSH Brute Force", "Honeypot": "Honeypot-SSH-01", "Data/Hora": "16/09/2025 14:32"},
     {"IP": "10.10.10.45", "Origem": "EUA", "Ataque": "SQL Injection", "Honeypot": "Honeypot-HTTP-01", "Data/Hora": "16/09/2025 14:35"},
@@ -63,15 +59,15 @@ def fetch_logs(api_base: str):
 # ================================
 st.set_page_config(page_title="Painel de Segurança", layout="wide")
 st.sidebar.title("📌 Navegação")
-menu = st.sidebar.radio("Escolha a seção:", ["IPs Maliciosos", "Logs", "Honeypots", "Criar VM com Honeypot", "Chat de Criação de VMs"])
+menu = st.sidebar.radio("Escolha a seção:", ["Conexoes", "Logs", "Honeypots", "Criar VM com Honeypot", "Chat de Criação de VMs"])
 st.sidebar.markdown("---")
 # Configuração da API (padrão pode ser alterado via variável de ambiente API_BASE_URL)
 api_base = st.sidebar.text_input("API Base URL", value=DEFAULT_API_BASE)
 use_api = st.sidebar.checkbox("Usar API (se disponível)", value=True)
 
 # Página: IPs Maliciosos
-if menu == "IPs Maliciosos":
-    st.title("🚨 IPs Maliciosos Detectados")
+if menu == "Conexoes":
+    st.title("🚨 Conexoes Detectadas")
 
     honeypots_list = fetch_honeypots(api_base) if use_api else None
     logs_list = fetch_logs(api_base) if use_api else None
@@ -166,7 +162,6 @@ elif menu == "Honeypots":
         hp_df = pd.DataFrame(honeypots_list)
         if 'created_at' in hp_df.columns:
             hp_df['created_at'] = pd.to_datetime(hp_df['created_at']).dt.strftime('%d/%m/%Y %H:%M')
-        # Mostra colunas relevantes (fallback para todas as colunas se alguma não existir)
         display_cols = [c for c in ['id', 'name', 'type', 'host', 'port', 'status', 'created_at'] if c in hp_df.columns]
         st.dataframe(hp_df[display_cols], use_container_width=True)
     else:
@@ -195,7 +190,7 @@ elif menu == "Criar VM com Honeypot":
                         created = resp.json()
                         st.success(f"VM {created.get('name', nome_vm)} com Honeypot {created.get('type', tipo_honeypot.lower())} criada com sucesso!")
                         st.session_state.new_vm = False
-                        st.experimental_rerun()
+                        st.rerun()
                     else:
                         st.error(f"Erro ao criar honeypot: {resp.status_code} - {resp.text}")
                 except RequestException as e:
