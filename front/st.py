@@ -63,7 +63,7 @@ def fetch_logs(api_base: str):
 # ================================
 st.set_page_config(page_title="Painel de Segurança", layout="wide")
 st.sidebar.title("📌 Navegação")
-menu = st.sidebar.radio("Escolha a seção:", ["IPs Maliciosos", "Logs", "Honeypots", "Criar VM com Honeypot"])
+menu = st.sidebar.radio("Escolha a seção:", ["IPs Maliciosos", "Logs", "Honeypots", "Criar Beehive Node com Honeypot"])
 st.sidebar.markdown("---")
 # Configuração da API (padrão pode ser alterado via variável de ambiente API_BASE_URL)
 api_base = st.sidebar.text_input("API Base URL", value=DEFAULT_API_BASE)
@@ -174,16 +174,16 @@ elif menu == "Honeypots":
         st.dataframe(MOCK_HONEYPOTS, width='stretch')
 
 # Página: Criar VM com Honeypot
-elif menu == "Criar VM com Honeypot":
-    st.title("🆕 Criar Nova VM com Honeypot")
+elif menu == "Criar Beehive Node com Honeypot":
+    st.title("🆕 Criar Nova Beehive Node com Honeypot")
     if "new_vm" not in st.session_state:
         st.session_state.new_vm = False
     if not st.session_state.new_vm:
-        if st.button("Criar Nova VM com Honeypot"):
+        if st.button("Criar Nova Beehive Node com Honeypot"):
             st.session_state.new_vm = True
     if st.session_state.new_vm:
         tipo_honeypot = st.selectbox("Selecione o tipo de Honeypot", ["SSH", "HTTP", "Telnet"])
-        nome_vm = st.text_input("Nome da VM", value=f"{tipo_honeypot}-vm")
+        nome_vm = st.text_input("Nome da Beehive Node", value=f"{tipo_honeypot}-node")
         default_ports = {"SSH": 22, "HTTP": 80, "Telnet": 23}
         port = st.number_input("Porta", min_value=1, max_value=65535, value=default_ports.get(tipo_honeypot, 22))
         if st.button("Confirmar Criação"):
@@ -193,7 +193,7 @@ elif menu == "Criar VM com Honeypot":
                     resp = requests.post(f"{api_base}/honeypots", json=payload, timeout=6)
                     if resp.status_code in (200, 201):
                         created = resp.json()
-                        st.success(f"VM {created.get('name', nome_vm)} com Honeypot {created.get('type', tipo_honeypot.lower())} criada com sucesso!")
+                        st.success(f"Beehive Node {created.get('name', nome_vm)} com Honeypot {created.get('type', tipo_honeypot.lower())} criada com sucesso!")
                         st.session_state.new_vm = False
                         st.experimental_rerun()
                     else:
@@ -202,6 +202,6 @@ elif menu == "Criar VM com Honeypot":
                     st.error(f"Falha ao conectar na API: {e}")
             else:
                 st.info("Modo offline: criação simulada.")
-                st.success(f"VM {nome_vm} com Honeypot {tipo_honeypot} (mock) criada!")
+                st.success(f"Beehive Node {nome_vm} com Honeypot {tipo_honeypot} (mock) criada!")
                 st.session_state.new_vm = False
 
