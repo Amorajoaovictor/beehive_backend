@@ -63,7 +63,7 @@ def fetch_logs(api_base: str):
 # ================================
 st.set_page_config(page_title="Painel de Segurança", layout="wide")
 st.sidebar.title("📌 Navegação")
-menu = st.sidebar.radio("Escolha a seção:", ["IPs Maliciosos", "Logs", "Honeypots", "Criar VM com Honeypot", "Chat de Criação de VMs"])
+menu = st.sidebar.radio("Escolha a seção:", ["IPs Maliciosos", "Logs", "Honeypots", "Criar VM com Honeypot"])
 st.sidebar.markdown("---")
 # Configuração da API (padrão pode ser alterado via variável de ambiente API_BASE_URL)
 api_base = st.sidebar.text_input("API Base URL", value=DEFAULT_API_BASE)
@@ -107,10 +107,10 @@ if menu == "IPs Maliciosos":
         if ips_df.empty:
             st.info("Nenhum IP registrado nos logs.")
         else:
-            st.dataframe(ips_df[['IP', 'Origem', 'Ataque', 'Honeypot', 'Data/Hora']], use_container_width=True)
+            st.dataframe(ips_df[['IP', 'Origem', 'Ataque', 'Honeypot', 'Data/Hora']], width='stretch')
     else:
         st.warning("API indisponível ou sem logs — exibindo dados de exemplo (mock).")
-        st.dataframe(MOCK_IPS, use_container_width=True)
+        st.dataframe(MOCK_IPS, width='stretch')
 
 # Página: Logs por Honeypot (GRID com 2 por linha)
 elif menu == "Logs":
@@ -168,10 +168,10 @@ elif menu == "Honeypots":
             hp_df['created_at'] = pd.to_datetime(hp_df['created_at']).dt.strftime('%d/%m/%Y %H:%M')
         # Mostra colunas relevantes (fallback para todas as colunas se alguma não existir)
         display_cols = [c for c in ['id', 'name', 'type', 'host', 'port', 'status', 'created_at'] if c in hp_df.columns]
-        st.dataframe(hp_df[display_cols], use_container_width=True)
+        st.dataframe(hp_df[display_cols], width='stretch')
     else:
         st.warning("API indisponível — exibindo honeypots de exemplo (mock).")
-        st.dataframe(MOCK_HONEYPOTS, use_container_width=True)
+        st.dataframe(MOCK_HONEYPOTS, width='stretch')
 
 # Página: Criar VM com Honeypot
 elif menu == "Criar VM com Honeypot":
@@ -205,53 +205,3 @@ elif menu == "Criar VM com Honeypot":
                 st.success(f"VM {nome_vm} com Honeypot {tipo_honeypot} (mock) criada!")
                 st.session_state.new_vm = False
 
-# Página: Chat de Criação de VMs
-elif menu == "Chat de Criação de VMs":
-    st.title("💬 Chat de Criação de VMs")
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-    prompt = st.chat_input("Digite sua solicitação...")
-    if prompt:
-        st.session_state.chat_history.append({"role": "user", "content": prompt})
-        st.chat_message("user").write(prompt)
-        # Checa se a mensagem solicita criação de VM com Honeypot
-        lower = prompt.lower()
-        if "criar vm" in lower and "honeypot" in lower:
-            # Parse simples do tipo pedido
-            def _parse_type(text: str):
-                t = text.lower()
-                if 'ssh' in t:
-                    return 'ssh'
-                if 'http' in t:
-                    return 'http'
-                if 'telnet' in t:
-                    return 'telnet'
-                return None
-
-            tipo = _parse_type(prompt)
-            if tipo is None:
-                response = "Especifique o tipo de Honeypot (SSH, HTTP ou Telnet)."
-                st.chat_message("assistant").write(response)
-                st.session_state.chat_history.append({"role": "assistant", "content": response})
-            else:
-                nome = f"vm-{tipo}-{int(datetime.utcnow().timestamp())}"
-                payload = {"name": nome, "type": tipo, "port": 22 if tipo == 'ssh' else (80 if tipo == 'http' else 23)}
-                if use_api:
-                    try:
-                        resp = requests.post(f"{api_base}/honeypots", json=payload, timeout=6)
-                        if resp.status_code in (200, 201):
-                            created = resp.json()
-                            response = f"VM com Honeypot {created.get('type')} criada: {created.get('name')} (id={created.get('id')})."
-                        else:
-                            response = f"Erro ao criar honeypot: {resp.status_code} - {resp.text}"
-                    except RequestException as e:
-                        response = f"Falha ao conectar na API para criar honeypot: {e}"
-                else:
-                    response = f"(mock) VM {nome} com Honeypot {tipo} criada com sucesso (modo offline)."
-
-                st.chat_message("assistant").write(response)
-                st.session_state.chat_history.append({"role": "assistant", "content": response})
-        else:
-            response = "Por favor, especifique 'Criar VM com Honeypot' e o tipo desejado (ex.: SSH)."
-            st.chat_message("assistant").write(response)
-            st.session_state.chat_history.append({"role": "assistant", "content": response})
