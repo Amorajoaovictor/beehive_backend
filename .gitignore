@@ -128,3 +128,4 @@ beehive.db
 
 # Migration files (uncomment if you want to exclude them)
 # migrations/
+.idea

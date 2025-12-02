@@ -32,7 +32,7 @@ pip install -r requirements.txt
 
 3. (Opcional) Configure variáveis de ambiente:
 ```bash
-cp .env.example .env
+cp .env .env
 # Edite .env com suas configurações
 ```
 
@@ -190,7 +190,7 @@ python test_api.py
 
 ### Variáveis de Ambiente
 
-Crie um arquivo `.env` baseado no `.env.example`:
+Crie um arquivo `.env` baseado no `.env`:
 
 ```env
 DATABASE_URL=sqlite:///beehive.db
